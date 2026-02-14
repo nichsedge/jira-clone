@@ -1,7 +1,7 @@
 
 'use server'
 
-import Imap from 'imap';
+import { ImapFlow } from 'imapflow';
 import { simpleParser, ParsedMail } from 'mailparser';
 import type { EmailCredentials } from '@/lib/types';
 
@@ -22,132 +22,80 @@ export async function fetchUnreadEmails(credentials: EmailCredentials): Promise<
         throw new Error(errorMessage);
     }
 
-    const imapConfig: Imap.Config = {
-        user: credentials.user,
-        password: credentials.pass,
+    const client = new ImapFlow({
         host: credentials.host,
         port: credentials.port,
-        tls: credentials.tls,
-        tlsOptions: {
+        secure: credentials.tls,
+        auth: {
+            user: credentials.user,
+            pass: credentials.pass
+        },
+        tls: {
             rejectUnauthorized: false
-        }
-    };
+        },
+        logger: false
+    });
 
-    return new Promise((resolve, reject) => {
-        const imap = new Imap(imapConfig);
-        const emails: ParsedMail[] = [];
+    const emails: ParsedMail[] = [];
+
+    try {
+        console.log('fetchUnreadEmails: Connecting to IMAP server...');
+        await client.connect();
         
-        console.log('fetchUnreadEmails: Attempting IMAP connection to', credentials.host, 'port', credentials.port);
+        console.log('fetchUnreadEmails: IMAP connection successful, opening INBOX');
+        const lock = await client.getMailboxLock('INBOX');
         
-        imap.once('ready', () => {
-            console.log('fetchUnreadEmails: IMAP connection successful, opening INBOX');
-            imap.openBox('INBOX', false, (err, box) => { // false so we don't mark as read automatically
-                if (err) {
-                    console.error('fetchUnreadEmails: Error opening INBOX:', err);
-                    imap.end();
-                    return reject(err);
+        try {
+            console.log('fetchUnreadEmails: INBOX opened, searching for UNSEEN emails');
+            // Search for messages that don't have the \Seen flag
+            const messages = await client.search({ seen: false });
+
+            if (!messages || messages.length === 0) {
+                console.log('fetchUnreadEmails: No unread emails found');
+                return [];
+            }
+
+            console.log(`fetchUnreadEmails: Found ${messages.length} UNSEEN emails`);
+
+            console.log('fetchUnreadEmails: Fetching email bodies...');
+            for (const seq of messages) {
+                console.log(`fetchUnreadEmails: Processing message with sequence number ${seq}`);
+                // fetchOne returns a Message object with source (Buffer)
+                const message = await client.fetchOne(seq.toString(), { source: true });
+                if (message && message.source) {
+                    const parsed = await simpleParser(message.source);
+                    console.log(`processMessage: Successfully parsed email with subject: "${parsed.subject || 'No Subject'}" from "${parsed.from?.text || 'Unknown'}"`);
+                    emails.push(parsed);
                 }
-                
-                console.log('fetchUnreadEmails: INBOX opened, searching for UNSEEN emails');
-                console.log('fetchUnreadEmails: INBOX info:', {
-                    messages: box.messages.total,
-                    new: box.messages.new
-                });
-                
-                imap.search(['UNSEEN'], (err, results) => {
-                    if (err) {
-                        console.error('fetchUnreadEmails: Search error:', err);
-                        imap.end();
-                        return reject(err);
-                    }
+            }
 
-                    console.log(`fetchUnreadEmails: Found ${results.length} UNSEEN emails`);
+            // Mark emails as read after successful parsing
+            if (emails.length > 0) {
+                console.log('fetchUnreadEmails: Marking emails as read...');
+                // Mark messages in the search results as seen
+                await client.messageFlagsAdd(messages.join(','), ['\\Seen']);
+                console.log('fetchUnreadEmails: Successfully marked emails as read');
+            }
 
-                    if (results.length === 0) {
-                        console.log('fetchUnreadEmails: No unread emails found');
-                        imap.end();
-                        return resolve([]);
-                    }
+        } finally {
+            // Always release the lock
+            lock.release();
+        }
 
-                    console.log('fetchUnreadEmails: Fetching email bodies...');
-                    const f = imap.fetch(results, { bodies: '' });
-                    const messagePromises: Promise<ParsedMail>[] = [];
+        // Logout from the IMAP server
+        await client.logout();
+        console.log(`fetchUnreadEmails: IMAP connection closed. Successfully processed ${emails.length} emails`);
+        return emails;
 
-                    f.on('message', (msg, seqno) => {
-                        console.log(`fetchUnreadEmails: Processing message ${seqno}`);
-                        messagePromises.push(processMessage(msg));
-                    });
-
-                    f.once('error', (err) => {
-                        console.error('fetchUnreadEmails: Fetch error:', err);
-                        imap.end();
-                        reject(err);
-                    });
-
-                    f.once('end', () => {
-                        console.log(`fetchUnreadEmails: All ${results.length} messages fetched, parsing...`);
-                        Promise.all(messagePromises).then(parsedEmails => {
-                            console.log(`fetchUnreadEmails: Successfully parsed ${parsedEmails.length} emails`);
-                            
-                            // Mark emails as read after successful parsing
-                            console.log('fetchUnreadEmails: Marking emails as read...');
-                            imap.addFlags(results, ['\\Seen'], (err) => {
-                                if (err) {
-                                    console.error('fetchUnreadEmails: Error marking emails as read:', err);
-                                    // Still resolve with emails, but log the error
-                                } else {
-                                    console.log('fetchUnreadEmails: Successfully marked emails as read');
-                                }
-                                imap.end();
-                                resolve(parsedEmails);
-                            });
-                        }).catch(err => {
-                             console.error('fetchUnreadEmails: Error parsing emails:', err);
-                             imap.end();
-                             reject(err);
-                        })
-                    });
-                });
-            });
-        });
-
-        imap.once('error', (err: Error) => {
-            console.error('fetchUnreadEmails: IMAP connection error:', err);
+    } catch (err) {
+        console.error('fetchUnreadEmails: IMAP error:', err);
+        if (err instanceof Error) {
             if (err.message.includes('AUTH')) {
                 console.error('fetchUnreadEmails: Authentication failed - check username/password and Gmail app password settings');
             } else if (err.message.includes('ECONNREFUSED') || err.message.includes('connect')) {
                 console.error('fetchUnreadEmails: Connection refused - check IMAP host/port and network connectivity');
             }
-            reject(err);
-        });
-
-        imap.once('end', () => {
-           console.log('fetchUnreadEmails: IMAP connection closed');
-        });
-
-        console.log('fetchUnreadEmails: Connecting to IMAP server...');
-        imap.connect();
-    });
+        }
+        throw err;
+    }
 }
-
-const processMessage = (msg: Imap.ImapMessage): Promise<ParsedMail> => {
-    return new Promise((resolveMessage, rejectMessage) => {
-        let buffer = '';
-        msg.on('body', (stream) => {
-            stream.on('data', (chunk) => {
-                buffer += chunk.toString('utf8');
-            });
-        });
-        msg.once('end', () => {
-           simpleParser(buffer)
-            .then((parsed) => {
-                console.log(`processMessage: Successfully parsed email with subject: "${parsed.subject || 'No Subject'}" from "${parsed.from?.text || 'Unknown'}"`);
-                resolveMessage(parsed);
-            })
-            .catch((err) => {
-                console.error('processMessage: Failed to parse email:', err);
-                rejectMessage(err);
-            });
-        });
-    });
-};
