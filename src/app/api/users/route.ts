@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';
+import { users as usersTable } from '@/lib/db/schema';
 import { authOptions } from '@/lib/auth';
 import type { Session } from 'next-auth';
-
-const prisma = new PrismaClient();
 
 interface ExtendedSession extends Session {
   user: {
@@ -15,6 +14,7 @@ interface ExtendedSession extends Session {
   };
 }
 
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions) as ExtendedSession;
@@ -22,14 +22,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const users = await prisma.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        image: true,
-      },
-    });
+    const users = await db.select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      image: usersTable.image,
+    }).from(usersTable);
 
     return NextResponse.json(users);
   } catch (error) {

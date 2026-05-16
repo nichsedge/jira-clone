@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';
+import * as schema from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { fetchUnreadEmails } from '@/services/email-service';
 import type { ParsedMail } from '@/services/email-service';
-
-const prisma = new PrismaClient();
 
 export async function POST(request: NextRequest) {
   let session;
@@ -20,9 +20,9 @@ export async function POST(request: NextRequest) {
     console.log('Email sync started for user:', session.user.id);
 
     // Get user email credentials from database
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: {
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.id, session.user.id),
+      columns: {
         imapHost: true,
         imapPort: true,
         imapUser: true,
@@ -75,28 +75,35 @@ export async function POST(request: NextRequest) {
       const subject = email.subject || 'No Subject';
       const body = email.text || email.html || 'No content';
       
+      const ticketId = `EMAIL-${email.messageId?.replace(/[<>\s]/g, '') || Date.now().toString()}`;
+
       // Check if this email already exists as a ticket (basic deduplication by messageId)
-      const existingTicket = await prisma.ticket.findUnique({
-        where: {
-          id: `EMAIL-${email.messageId?.replace(/[<>\s]/g, '') || Date.now().toString()}`,
-        },
+      const existingTicket = await db.query.tickets.findFirst({
+        where: eq(schema.tickets.id, ticketId),
       });
 
       if (!existingTicket) {
-        const ticket = await prisma.ticket.create({
-          data: {
-            id: `EMAIL-${email.messageId?.replace(/[<>\s]/g, '') || Date.now().toString()}`,
-            title: subject.length > 100 ? `${subject.substring(0, 97)}...` : subject,
-            description: `Email from ${email.from?.text || 'Unknown'}:\n\n${body.substring(0, 1000)}`,
-            statusId: 'status-open', // Default to open status
-            priority: 'MEDIUM',
-            projectId: session.user.id, // Use user ID as project for now, or create a default project
-            assigneeId: session.user.id,
-            category: 'EMAIL',
-          },
+        await db.insert(schema.tickets).values({
+          id: ticketId,
+          title: subject.length > 100 ? `${subject.substring(0, 97)}...` : subject,
+          description: `Email from ${email.from?.text || 'Unknown'}:\n\n${body.substring(0, 1000)}`,
+          statusId: 'status-open', // Default to open status
+          priority: 'MEDIUM',
+          projectId: session.user.id, // Use user ID as project for now, or create a default project
+          assigneeId: session.user.id,
+          category: 'EMAIL',
+          updatedAt: new Date(),
+          createdAt: new Date(),
         });
-        createdTickets.push(ticket);
-        console.log(`Created ticket from email: ${ticket.id}`);
+        
+        const ticket = await db.query.tickets.findFirst({
+          where: eq(schema.tickets.id, ticketId),
+        });
+
+        if (ticket) {
+          createdTickets.push(ticket);
+          console.log(`Created ticket from email: ${ticket.id}`);
+        }
       } else {
         console.log(`Email already processed as ticket: ${existingTicket.id}`);
       }
@@ -117,7 +124,5 @@ export async function POST(request: NextRequest) {
       { error: 'Failed to sync emails', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

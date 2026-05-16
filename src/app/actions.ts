@@ -1,17 +1,16 @@
 'use server';
 
 import { type Ticket, type TicketPriority, type User, type EmailSettings } from '@/lib/types';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';
+import * as schema from '@/lib/db/schema';
+import { eq, or, and, sql, exists, getTableColumns, inArray } from 'drizzle-orm';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { z } from 'zod';
-import { sendMail } from '@/services/email-sender';
-import { fetchUnreadEmails } from '@/services/email-service';
 import { getEmailSettings } from '@/lib/email-settings';
-import bcrypt from 'bcryptjs';
 import type { Session } from 'next-auth';
+import { createId } from '@paralleldrive/cuid2';
 
-const prisma = new PrismaClient();
 
 interface ExtendedSession extends Session {
   user: {
@@ -86,47 +85,66 @@ export async function createTicketAction(values: z.infer<typeof createTicketSche
 
   try {
     // Check project access
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { ownerId: session.user.id },
-          { members: { some: { id: session.user.id } } }
-        ]
-      },
+    const project = await db.query.projects.findFirst({
+      where: and(
+        eq(schema.projects.id, projectId),
+        or(
+          eq(schema.projects.ownerId, session.user.id),
+          exists(
+            db.select()
+              .from(schema.projectMembers)
+              .where(
+                and(
+                  eq(schema.projectMembers.projectId, projectId),
+                  eq(schema.projectMembers.userId, session.user.id)
+                )
+              )
+          )
+        )
+      ),
     });
 
     if (!project) {
       return { error: 'Project not found or unauthorized' };
     }
 
-    let statusConnect = { id: 'status-todo' }; // Default to To Do
+    let finalStatusId = 'status-todo'; // Default to To Do
     if (statusId) {
-      const status = await prisma.status.findUnique({
-        where: { id: statusId },
+      const status = await db.query.statuses.findFirst({
+        where: eq(schema.statuses.id, statusId),
       });
       if (status) {
-        statusConnect = { id: statusId };
+        finalStatusId = statusId;
       }
     }
 
     const now = new Date();
-    const newTicket = await prisma.ticket.create({
-      data: {
-        title,
-        description: description || undefined,
-        status: { connect: statusConnect } as any,
-        priority: priorityMap[priority] as any,
-        project: { connect: { id: projectId } } as any,
-        ...(assigneeId && { assignee: { connect: { id: assigneeId } } as any }),
-        updatedAt: now,
-      },
-      include: {
+    const ticketId = createId();
+    
+    await db.insert(schema.tickets).values({
+      id: ticketId,
+      title,
+      description: description || null,
+      statusId: finalStatusId,
+      priority: priorityMap[priority] as any,
+      projectId: projectId,
+      assigneeId: assigneeId || null,
+      updatedAt: now,
+      createdAt: now,
+    });
+
+    const newTicket = await db.query.tickets.findFirst({
+      where: eq(schema.tickets.id, ticketId),
+      with: {
         project: true,
         assignee: true,
         status: true,
-      } as any,
+      },
     });
+
+    if (!newTicket) {
+      return { error: 'Failed to retrieve created ticket.' };
+    }
 
     // Map back to frontend type if needed
     const ticket: Ticket = {
@@ -141,7 +159,7 @@ export async function createTicketAction(values: z.infer<typeof createTicketSche
       assignee: newTicket.assignee ? { id: newTicket.assignee.id, name: newTicket.assignee.name || 'Unknown', email: newTicket.assignee.email || '', image: newTicket.assignee.image || '', priority: 'MEDIUM' } : undefined,
       reporter: reporter,
       projectId: newTicket.projectId,
-      project: newTicket.project, // Include project
+      project: newTicket.project as any, // Include project
     };
 
     return { ticket };
@@ -170,13 +188,13 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
   const { id, title, description, status, priority, assigneeId, category, projectId, createdAt, emailSettings } = validatedFields.data;
   
   // Get existing ticket data for base information
-  const existingTicket = await prisma.ticket.findUnique({
-    where: { id },
-    include: {
+  const existingTicket = await db.query.tickets.findFirst({
+    where: eq(schema.tickets.id, id),
+    with: {
       assignee: true,
       status: true,
       project: true
-    } as any,
+    }
   });
 
   if (!existingTicket) {
@@ -184,14 +202,23 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
   }
 
   // Check project access
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId || existingTicket.projectId,
-      OR: [
-        { ownerId: session.user.id },
-        { members: { some: { id: session.user.id } } }
-      ]
-    },
+  const project = await db.query.projects.findFirst({
+    where: and(
+      eq(schema.projects.id, projectId || existingTicket.projectId),
+      or(
+        eq(schema.projects.ownerId, session.user.id),
+        exists(
+          db.select()
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, projectId || existingTicket.projectId),
+                eq(schema.projectMembers.userId, session.user.id)
+              )
+            )
+        )
+      )
+    ),
   });
 
   if (!project) {
@@ -204,8 +231,8 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
     if (assigneeId === null || assigneeId === '') {
       validAssigneeId = null;
     } else {
-      const assignee = await prisma.user.findUnique({
-        where: { id: assigneeId },
+      const assignee = await db.query.users.findFirst({
+        where: eq(schema.users.id, assigneeId),
       });
       if (!assignee) {
         console.warn(`Assignee not found: ${assigneeId}, clearing assignment`);
@@ -216,15 +243,15 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
     }
   }
 
-  let statusToConnect = null;
+  let statusToConnectId = null;
   if (status) {
-    const statusToUpdate = await prisma.status.findFirst({
-      where: { name: status },
+    const statusToUpdate = await db.query.statuses.findFirst({
+      where: eq(schema.statuses.name, status),
     });
     if (!statusToUpdate) {
       return { error: `Status "${status}" not found.` };
     }
-    statusToConnect = statusToUpdate;
+    statusToConnectId = statusToUpdate.id;
   }
 
   const updateFields: any = {
@@ -237,8 +264,8 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
   if (description !== undefined) {
     updateFields.description = description;
   }
-  if (statusToConnect) {
-    updateFields.statusId = statusToConnect.id;
+  if (statusToConnectId) {
+    updateFields.statusId = statusToConnectId;
   }
   if (priority !== undefined) {
     updateFields.priority = priorityMap[priority] as any;
@@ -253,15 +280,22 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
     updateFields.projectId = projectId;
   }
 
-  const updatedTicket = await prisma.ticket.update({
-    where: { id },
-    data: updateFields,
-    include: {
+  await db.update(schema.tickets)
+    .set(updateFields)
+    .where(eq(schema.tickets.id, id));
+
+  const updatedTicket = await db.query.tickets.findFirst({
+    where: eq(schema.tickets.id, id),
+    with: {
       project: true,
       assignee: true,
       status: true,
-    } as any,
+    }
   });
+
+  if (!updatedTicket) {
+    return { error: 'Failed to retrieve updated ticket.' };
+  }
 
   const frontendStatus = updatedTicket.status as any;
   const currentPriority = existingTicket.priority;
@@ -306,6 +340,7 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
       `;
 
       // Use a default email or skip if no reporter email available
+      const { sendMail } = await import('@/services/email-sender');
       await sendMail({
         to: 'support@proflow.com', // Default support email
         subject: subject,
@@ -319,181 +354,10 @@ export async function updateTicketAction(values: z.infer<typeof updateTicketSche
   }
 
   return { ticket: ticketData };
-
-  try {
-    const ticket = await prisma.ticket.findUnique({
-      where: { id },
-      include: { project: true, assignee: true },
-    });
-
-    if (!ticket) {
-      return { error: 'Ticket not found' };
-    }
-
-    // Check project access
-    const project = await prisma.project.findFirst({
-      where: {
-        id: ticket.projectId,
-        OR: [
-          { ownerId: session.user.id },
-          { members: { some: { id: session.user.id } } }
-        ]
-      },
-    });
-
-    if (!project) {
-      return { error: 'Project not found or unauthorized' };
-    }
-
-    // Get current ticket data for partial updates
-    const currentTicket = await prisma.ticket.findUnique({
-      where: { id },
-      include: {
-        assignee: true,
-        status: true,
-        project: true
-      } as any,
-    });
-
-    if (!currentTicket) {
-      return { error: 'Ticket not found' };
-    }
-
-    // Validate assignee exists if provided
-    let validAssigneeId = currentTicket.assigneeId;
-    if (updateData.assigneeId !== undefined) {
-      if (updateData.assigneeId === null || updateData.assigneeId === '') {
-        validAssigneeId = null;
-      } else {
-        const assignee = await prisma.user.findUnique({
-          where: { id: updateData.assigneeId },
-        });
-        if (!assignee) {
-          console.warn(`Assignee not found: ${updateData.assigneeId}, clearing assignment`);
-          validAssigneeId = null;
-        } else {
-          validAssigneeId = updateData.assigneeId;
-        }
-      }
-    }
-
-    let statusToConnect = null;
-    if (updateData.statusId) {
-      statusToConnect = { id: updateData.statusId };
-    } else if (updateData.status) {
-      const statusToUpdate = await prisma.status.findFirst({
-        where: { name: updateData.status },
-      });
-      if (!statusToUpdate) {
-        return { error: `Status "${updateData.status}" not found.` };
-      }
-      statusToConnect = statusToUpdate;
-    }
-
-    const updateFields: any = {
-      updatedAt: new Date(),
-    };
-
-    if (updateData.title !== undefined) {
-      updateFields.title = updateData.title;
-    }
-    if (updateData.description !== undefined) {
-      updateFields.description = updateData.description;
-    }
-    if (statusToConnect) {
-      updateFields.statusId = 'id' in statusToConnect ? statusToConnect.id : statusToConnect;
-    }
-    if (updateData.priority !== undefined) {
-      updateFields.priority = priorityMap[updateData.priority] as any;
-    }
-    if (validAssigneeId !== undefined) {
-      updateFields.assigneeId = validAssigneeId;
-    }
-    if (updateData.category !== undefined) {
-      updateFields.category = updateData.category;
-    }
-    if (updateData.projectId !== undefined) {
-      // Validate access to new project
-      const newProject = await prisma.project.findFirst({
-        where: {
-          id: updateData.projectId,
-          OR: [
-            { ownerId: session.user.id },
-            { members: { some: { id: session.user.id } } }
-          ]
-        },
-      });
-      if (!newProject) {
-        return { error: 'New project not found or unauthorized' };
-      }
-      updateFields.projectId = updateData.projectId;
-    }
-
-    const updatedTicket = await prisma.ticket.update({
-      where: { id },
-      data: updateFields,
-      include: {
-        project: true,
-        assignee: true,
-        status: true,
-      } as any,
-    });
-
-    const frontendStatus = updatedTicket.status as any;
-    const currentPriority = currentTicket.priority;
-    const ticketData: Ticket = {
-      id: updatedTicket.id,
-      title: updateData.title !== undefined ? updateData.title : updatedTicket.title || '',
-      description: updateData.description !== undefined ? updateData.description : updatedTicket.description || '',
-      status: frontendStatus,
-      category: updateData.category || 'General',
-      priority: (updateData.priority !== undefined ? updateData.priority : displayPriorityMap[currentPriority] || 'Medium') as any,
-      assignee: updatedTicket.assignee ? { id: updatedTicket.assignee.id, name: updatedTicket.assignee.name || 'Unknown', email: updatedTicket.assignee.email || '', image: updatedTicket.assignee.image || '', priority: 'MEDIUM' } : undefined,
-      reporter,
-      projectId: updatedTicket.projectId,
-      project: updatedTicket.project, // Include project
-      createdAt: new Date(createdAt),
-      updatedAt: updatedTicket.updatedAt,
-    };
-
-    // Email notification if status is DONE and reporter email exists
-    if (frontendStatus?.name === 'Done' && validatedFields.data.reporter?.email && emailSettings?.smtp) {
-      try {
-        const subject = `Ticket Resolved: ${ticketData.id} - ${ticketData.title}`;
-        const textBody = `Hello,\n\nYour support ticket "${ticketData.title}" with ID ${ticketData.id} has been marked as resolved.\n\nThank you for using our support system.\n\nThe ProFlow Team`;
-        const htmlBody = `
-          <div style="font-family: sans-serif; line-height: 1.6;">
-            <h2>Ticket Resolved: ${ticketData.id}</h2>
-            <p>Hello,</p>
-            <p>Your support ticket "<strong>${ticketData.title}</strong>" has been marked as resolved.</p>
-            <p>If you feel the issue is not resolved, please reply to this email to reopen the ticket.</p>
-            <br/>
-            <p>Thank you,</p>
-            <p><strong>The ProFlow Team</strong></p>
-          </div>
-        `;
-
-        await sendMail({
-          to: validatedFields.data.reporter.email,
-          subject: subject,
-          text: textBody,
-          html: htmlBody,
-        }, emailSettings.smtp);
-      } catch (emailError) {
-        console.error("Failed to send email notification:", emailError);
-        return { ticket: ticketData, error: "Ticket updated, but failed to send email notification." };
-      }
-    }
-
-    return { ticket: ticketData };
-  } catch (error) {
-    console.error('Update ticket error details:', error);
-    if (error instanceof Error) {
-      return { error: `Failed to update ticket: ${error.message}` };
-    }
-    return { error: 'Failed to update ticket: Unknown error' };
-  }
 }
+
+
+
 
 export async function deleteTicketAction(values: z.infer<typeof deleteTicketSchema>): Promise<{ id?: string, error?: string }> {
   const session = await getServerSession(authOptions) as ExtendedSession;
@@ -510,9 +374,9 @@ export async function deleteTicketAction(values: z.infer<typeof deleteTicketSche
   }
 
   try {
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: validatedFields.data.id },
-      include: { project: true },
+    const ticket = await db.query.tickets.findFirst({
+      where: eq(schema.tickets.id, validatedFields.data.id),
+      with: { project: true },
     });
 
     if (!ticket) {
@@ -520,23 +384,31 @@ export async function deleteTicketAction(values: z.infer<typeof deleteTicketSche
     }
 
     // Check project access
-    const project = await prisma.project.findFirst({
-      where: {
-        id: ticket.projectId,
-        OR: [
-          { ownerId: session.user.id },
-          { members: { some: { id: session.user.id } } }
-        ]
-      },
+    const project = await db.query.projects.findFirst({
+      where: and(
+        eq(schema.projects.id, ticket.projectId),
+        or(
+          eq(schema.projects.ownerId, session.user.id),
+          exists(
+            db.select()
+              .from(schema.projectMembers)
+              .where(
+                and(
+                  eq(schema.projectMembers.projectId, ticket.projectId),
+                  eq(schema.projectMembers.userId, session.user.id)
+                )
+              )
+          )
+        )
+      ),
     });
 
     if (!project) {
       return { error: 'Project not found or unauthorized' };
     }
 
-    await prisma.ticket.delete({
-      where: { id: validatedFields.data.id },
-    });
+    await db.delete(schema.tickets)
+      .where(eq(schema.tickets.id, validatedFields.data.id));
 
     return { id: validatedFields.data.id };
   } catch (error) {
@@ -586,6 +458,7 @@ export async function syncEmailsAction(existingUsers: User[], emailSettings: Ema
       tls: finalEmailSettings.imap.tls
     });
 
+    const { fetchUnreadEmails } = await import('@/services/email-service');
     const emails = await fetchUnreadEmails(finalEmailSettings.imap);
     console.log('syncEmailsAction: Fetched', emails.length, 'unread emails');
     
@@ -612,24 +485,37 @@ export async function syncEmailsAction(existingUsers: User[], emailSettings: Ema
             continue;
         }
 
-        let reporter = await prisma.user.findUnique({
-          where: { email: fromEmail },
+        let reporter = await db.query.users.findFirst({
+          where: eq(schema.users.email, fromEmail),
         });
 
         let reporterFrontend: User;
 
         if (!reporter) {
             // Create new user (for demo, no password, or set default; in real, send email for setup)
+            const bcrypt = await import('bcryptjs');
             const fromName = email.from?.value[0]?.name || fromEmail.split('@')[0] || "Email User";
             const hashedPassword = await bcrypt.hash('defaultPassword123', 12); // Temp default
-            const createdReporter = await prisma.user.create({
-              data: {
-                name: fromName,
-                email: fromEmail,
-                hashedPassword,
-                image: `https://placehold.co/32x32/E9D5FF/6D28D9/png?text=${fromName.charAt(0).toUpperCase()}`,
-              },
+            const reporterId = createId();
+            
+            await db.insert(schema.users).values({
+              id: reporterId,
+              name: fromName,
+              email: fromEmail,
+              hashedPassword,
+              image: `https://placehold.co/32x32/E9D5FF/6D28D9/png?text=${fromName.charAt(0).toUpperCase()}`,
+              updatedAt: new Date(),
+              createdAt: new Date(),
             });
+
+            const createdReporter = await db.query.users.findFirst({
+              where: eq(schema.users.id, reporterId),
+            });
+
+            if (!createdReporter) {
+              console.error('Failed to create reporter user');
+              continue;
+            }
 
             reporterFrontend = {
               id: createdReporter.id,
@@ -655,8 +541,8 @@ export async function syncEmailsAction(existingUsers: User[], emailSettings: Ema
 
         const now = new Date();
 
-        const toDoStatus = await prisma.status.findFirst({
-          where: { name: 'To Do' },
+        const toDoStatus = await db.query.statuses.findFirst({
+          where: eq(schema.statuses.name, 'To Do'),
         });
 
         if (!toDoStatus) {
@@ -664,28 +550,31 @@ export async function syncEmailsAction(existingUsers: User[], emailSettings: Ema
           continue; // Skip this email if default status is not found
         }
 
-        const newTicket = await prisma.ticket.create({
-          data: {
-            title,
-            description: description || undefined,
-            status: { connect: { id: toDoStatus.id } } as any,
-            priority: 'MEDIUM' as any,
-            project: { connect: { id: 'PROJ-1' } } as any,
-            updatedAt: now,
-          },
-          include: {
+        const ticketId = createId();
+        await db.insert(schema.tickets).values({
+          id: ticketId,
+          title,
+          description: description || null,
+          statusId: toDoStatus.id,
+          priority: 'MEDIUM' as any,
+          projectId: 'PROJ-1',
+          updatedAt: now,
+          createdAt: now,
+        });
+
+        const newTicket = await db.query.tickets.findFirst({
+          where: eq(schema.tickets.id, ticketId),
+          with: {
             project: true,
-            assignee: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                image: true
-              }
-            },
-            status: true, // Include status to map back to frontend type
+            assignee: true,
+            status: true,
           },
         });
+
+        if (!newTicket) {
+          console.error('Failed to retrieve created ticket');
+          continue;
+        }
         
         const ticket: Ticket = {
           id: newTicket.id,

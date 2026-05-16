@@ -77,9 +77,6 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
   }, [])
 
   const ticketsByStatus = useMemo(() => {
-    console.log('DEBUG: Available statuses:', statuses);
-    console.log('DEBUG: All tickets:', tickets.length);
-    
     const grouped: Record<string, Ticket[]> = {};
     
     // Initialize all status columns
@@ -88,36 +85,22 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
     });
     
     tickets.forEach(ticket => {
-      console.log('DEBUG: Ticket', ticket.id, 'status:', ticket.status);
-      
       let statusId: string = '';
       
       if (ticket.status && typeof ticket.status === 'object' && 'id' in ticket.status) {
         statusId = (ticket.status as any).id;
-        console.log('DEBUG: Using status object ID:', statusId);
       } else if (typeof ticket.status === 'string') {
-        // Direct ID match
         statusId = ticket.status;
-        console.log('DEBUG: Using string status ID:', statusId);
       }
       
-      // Check if statusId matches any available status
       if (statusId && statuses.some(s => s.id === statusId)) {
         grouped[statusId].push(ticket);
-        console.log('DEBUG: Assigned ticket', ticket.id, 'to status ID', statusId);
       } else {
-        // Fallback to first status (To Do)
         const firstStatusId = statuses[0]?.id || '';
         if (firstStatusId) {
           grouped[firstStatusId].push(ticket);
-          console.log('DEBUG: Fallback assigned ticket', ticket.id, 'to', firstStatusId);
         }
       }
-    });
-    
-    console.log('DEBUG: Final column distribution by ID:');
-    Object.keys(grouped).forEach(key => {
-      console.log(`  ${key}: ${grouped[key].length} tickets`);
     });
     
     return grouped;
@@ -168,13 +151,10 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
       const targetStatus = statuses.find(s => s.id === overId);
       if (targetStatus) {
         const newStatusId = targetStatus.id;
-        // Check if status needs to change
         const currentStatusId = (typeof activeTicket.status === 'object' ? activeTicket.status?.id : activeTicket.status) || '';
         if (currentStatusId !== newStatusId) {
-            // Update status to match the target status object
             activeTicket.status = targetStatus;
             
-            // Move to the end of the new column's list of tickets
             const otherTickets = newTickets.filter(t => t.id !== activeId);
             const columnTickets = otherTickets.filter(t => {
               const tStatusId = (typeof t.status === 'object' ? t.status?.id : t.status) || '';
@@ -222,7 +202,6 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
         }
       }
 
-      // After client-side update, find the updated ticket and call the server action
       const updatedTicket = newTickets.find(t => t.id === activeId);
       if (updatedTicket && (updatedTicket.status !== originalActiveTicket.status || JSON.stringify(updatedTicket) !== JSON.stringify(originalActiveTicket))) {
         startTransition(async () => {
@@ -240,10 +219,9 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
               title: "Uh oh! Something went wrong.",
               description: result.error,
             });
-            // Revert client-side change on failure
             setTickets(prevTickets);
           } else if (result.ticket) {
-              if (result.error) { // Ticket updated but email failed
+              if (result.error) {
                 toast({
                   variant: "destructive",
                   title: "Ticket Updated, Email Failed",
@@ -277,11 +255,13 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
       onDragEnd={handleDragEnd}
       onDragCancel={() => setActiveTicket(null)}
     >
-      <ScrollArea className="w-full">
-        <div className="flex gap-6 pb-4">
+      <ScrollArea className="w-full whitespace-nowrap rounded-3xl border-none bg-muted/5 backdrop-blur-sm shadow-inner relative overflow-hidden">
+        {/* Background texture for the board */}
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
+        
+        <div className="flex gap-10 p-8 min-h-[calc(100vh-340px)] relative z-10">
           {statuses.map((status) => {
             const statusTickets = ticketsByStatus[status.id] || [];
-            console.log('DEBUG: Rendering', status.name, 'column with', statusTickets.length, 'tickets');
             return (
               <TicketColumn
                 key={status.id}
@@ -292,8 +272,9 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
             );
           })}
         </div>
-        <ScrollBar orientation="horizontal" />
+        <ScrollBar orientation="horizontal" className="bg-transparent" />
       </ScrollArea>
+
 
       <DragOverlay>
         {activeTicket ? <TicketCard ticket={activeTicket} isOverlay /> : null}
@@ -308,7 +289,6 @@ export function TicketBoard({ tickets, setTickets, onTicketUpdated, onTicketDele
         ticket={selectedTicket}
         onTicketUpdated={(updatedTicket) => {
           onTicketUpdated(updatedTicket);
-          // Also update the selected ticket to reflect changes immediately
           setSelectedTicket(current => current ? {...current, ...updatedTicket} : null);
         }}
         onTicketDeleted={onTicketDeleted}

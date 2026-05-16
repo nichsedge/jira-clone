@@ -1,38 +1,22 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  Home,
-  Ticket as TicketIcon,
-  Users,
-  Settings,
-  ChevronLeft,
   FolderKanban,
   PlusCircle,
   MoreHorizontal,
   Pencil,
-  Trash2
+  Trash2,
+  Calendar,
 } from "lucide-react";
 
-import {
-  SidebarProvider,
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarFooter,
-  SidebarInset,
-} from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -53,13 +37,12 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-import { UserNav } from "@/components/user-nav";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Logo } from "@/components/logo";
-import { User, Project } from "@/lib/types";
+import { MainLayout } from "@/components/main-layout";
+import { Project } from "@/lib/types";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { toast } from "@/hooks/use-toast";
 import { useSession } from "next-auth/react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -81,8 +64,6 @@ export default function ProjectsPage() {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        // No currentUser state needed for production
-
         const projectsRes = await fetch('/api/projects');
 
         if (projectsRes.ok) {
@@ -107,7 +88,7 @@ export default function ProjectsPage() {
     };
 
     loadData();
-  }, [status, session?.user?.id, router]); // Add router to dependencies
+  }, [status, session?.user?.id, router]);
 
   const refetchProjects = async () => {
     const res = await fetch('/api/projects');
@@ -214,145 +195,96 @@ export default function ProjectsPage() {
     setIsAddProjectDialogOpen(true);
   }
 
-  if (isLoading || status === 'loading') {
-    return <div>Loading...</div>;
-  }
-
-  if (!session) {
-    return null; // Will redirect via useEffect
-  }
+  const headerActions = (
+    <Button onClick={openAddDialog} className="premium-gradient shadow-lg shadow-primary/20 hover:scale-105 transition-transform">
+      <PlusCircle className="mr-2 h-4 w-4" />
+      Add Project
+    </Button>
+  );
 
   return (
-    <SidebarProvider>
-       <Sidebar collapsible="icon">
-        <SidebarHeader>
-           <div className="flex items-center gap-2 p-2">
-            <Logo />
-            <span className="font-semibold text-lg">ProFlow</span>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/">
-                  <Home />
-                  Dashboard
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive>
-                <Link href="/projects">
-                  <FolderKanban />
-                  Projects
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/tickets">
-                  <TicketIcon />
-                  All Tickets
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/users">
-                  <Users />
-                  Users
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarContent>
-        <SidebarFooter>
-            <div className="flex items-center gap-2 p-2">
-                {session && <UserNav session={session} />}
-            </div>
-             <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild>
-                    <Link href="/settings">
-                      <Settings />
-                      Settings
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                    <ThemeToggle />
-                </SidebarMenuItem>
-            </SidebarMenu>
-        </SidebarFooter>
-      </Sidebar>
-      <SidebarInset>
-        <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 lg:h-[60px] lg:px-6">
-          <div className="flex-1">
-             <h1 className="font-semibold text-lg">Projects</h1>
-          </div>
-          <Button onClick={openAddDialog}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Add Project
-          </Button>
-        </header>
-        <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {projects.map(project => (
-                <Card key={project.id}>
-                    <CardHeader className="flex flex-row items-start justify-between">
-                        <div>
-                            <CardTitle>{project.name}</CardTitle>
-                            <CardDescription>{project.id}</CardDescription>
-                        </div>
-                         <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                    <span className="sr-only">Actions</span>
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onSelect={() => openEditDialog(project)}>
-                                    <Pencil className="mr-2 h-4 w-4" /> Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => setProjectToDelete(project)} className="text-red-600">
-                                    <Trash2 className="mr-2 h-4 w-4" /> Delete
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+    <MainLayout headerTitle="Projects" headerActions={headerActions}>
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {isLoading ? (
+            [...Array(3)].map((_, i) => (
+                <Card key={i} className="border-border/50 bg-card/50 backdrop-blur-xl h-48">
+                    <CardHeader>
+                        <Skeleton className="h-6 w-3/4" />
+                        <Skeleton className="h-4 w-1/2 mt-2" />
                     </CardHeader>
                     <CardContent>
-                        <p className="text-sm text-muted-foreground">{project.description}</p>
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-5/6 mt-2" />
                     </CardContent>
                 </Card>
-            ))}
-          </div>
-        </main>
-        <AddProjectDialog
-            isOpen={isAddProjectDialogOpen}
-            onOpenChange={setIsAddProjectDialogOpen}
-            projectToEdit={projectToEdit}
-            onProjectAdded={handleProjectAdded}
-            onProjectUpdated={handleProjectUpdated}
-        />
-        <AlertDialog open={!!projectToDelete} onOpenChange={(open) => !open && setProjectToDelete(undefined)}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete the project <span className="font-semibold">{projectToDelete?.name}</span>. Any associated tickets will not be deleted but will no longer be linked to this project.
-                </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleProjectDeleted}>
-                    Delete
-                </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-      </SidebarInset>
-    </SidebarProvider>
+            ))
+        ) : projects.map(project => (
+            <Card key={project.id} className="group overflow-hidden border-border/50 bg-card/40 backdrop-blur-xl transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/20 relative">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-primary/5 rounded-bl-full group-hover:bg-primary/10 transition-colors" />
+                <CardHeader className="flex flex-row items-start justify-between pb-2">
+                    <div className="space-y-1">
+                        <CardTitle className="text-lg font-bold group-hover:text-primary transition-colors">{project.name}</CardTitle>
+                        <CardDescription className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5">
+                            <FolderKanban className="h-3 w-3" />
+                            {project.id.split('-')[0]}
+                        </CardDescription>
+                    </div>
+                     <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-primary/10">
+                                <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="bg-background/80 backdrop-blur-xl border-border/50">
+                            <DropdownMenuItem onSelect={() => openEditDialog(project)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => setProjectToDelete(project)} className="text-rose-500 hover:bg-rose-500/10">
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </CardHeader>
+                <CardContent className="pb-6">
+                    <p className="text-sm text-muted-foreground font-medium leading-relaxed italic line-clamp-2">
+                        {project.description || "No description provided."}
+                    </p>
+                    <div className="mt-6 flex items-center gap-4 text-[10px] font-black uppercase tracking-tighter text-muted-foreground/50">
+                        <div className="flex items-center gap-1.5">
+                            <Calendar className="h-3 w-3" />
+                            Active Project
+                        </div>
+                    </div>
+                </CardContent>
+                <div className="h-1 w-full bg-primary/20 group-hover:bg-primary transition-colors" />
+            </Card>
+        ))}
+      </div>
+      
+      <AddProjectDialog
+          isOpen={isAddProjectDialogOpen}
+          onOpenChange={setIsAddProjectDialogOpen}
+          projectToEdit={projectToEdit}
+          onProjectAdded={handleProjectAdded}
+          onProjectUpdated={handleProjectUpdated}
+      />
+      
+      <AlertDialog open={!!projectToDelete} onOpenChange={(open) => !open && setProjectToDelete(undefined)}>
+          <AlertDialogContent className="bg-background/95 backdrop-blur-xl border-border/50">
+              <AlertDialogHeader>
+              <AlertDialogTitle className="font-bold">Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription className="text-sm font-medium">
+                  This action cannot be undone. This will permanently delete the project <span className="font-bold text-foreground">"{projectToDelete?.name}"</span>.
+              </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+              <AlertDialogCancel className="border-border/50">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleProjectDeleted} className="bg-rose-500 hover:bg-rose-600 text-white">
+                  Delete
+              </AlertDialogAction>
+              </AlertDialogFooter>
+          </AlertDialogContent>
+      </AlertDialog>
+    </MainLayout>
   );
 }

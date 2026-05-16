@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';
+import * as schema from '@/lib/db/schema';
+import { eq, or, and, exists } from 'drizzle-orm';
+import { createId } from '@paralleldrive/cuid2';
 import { authOptions } from '@/lib/auth';
-
-const prisma = new PrismaClient();
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,21 +15,38 @@ export async function GET(request: NextRequest) {
 
     const userId = session.user.id;
 
-    const projects = await prisma.project.findMany({
-      where: {
-        OR: [
-          { ownerId: userId },
-          { members: { some: { id: userId } } }
-        ]
-      },
-      include: {
+    const projects = await db.query.projects.findMany({
+      where: or(
+        eq(schema.projects.ownerId, userId),
+        exists(
+          db.select()
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, schema.projects.id),
+                eq(schema.projectMembers.userId, userId)
+              )
+            )
+        )
+      ),
+      with: {
         owner: true,
-        members: true,
+        members: {
+          with: {
+            user: true
+          }
+        },
         tickets: true,
       },
     });
 
-    return NextResponse.json(projects);
+    // Map members to match Prisma's format (User[])
+    const projectsWithMappedMembers = projects.map(p => ({
+      ...p,
+      members: p.members.map(m => m.user)
+    }));
+
+    return NextResponse.json(projectsWithMappedMembers);
   } catch (error) {
     console.error('Error fetching projects:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
@@ -43,8 +61,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate that the user exists in the database
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id }
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.id, session.user.id)
     });
     if (!user) {
       return NextResponse.json({ error: 'User not found. Please register first.' }, { status: 404 });
@@ -57,23 +75,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
 
-    const project = await prisma.project.create({
-      data: {
-        name,
-        description,
-        ownerId: session.user.id,
-      },
-      include: {
+    const projectId = createId();
+    await db.insert(schema.projects).values({
+      id: projectId,
+      name,
+      description,
+      ownerId: session.user.id,
+      updatedAt: new Date(),
+      createdAt: new Date(),
+    });
+
+    const project = await db.query.projects.findFirst({
+      where: eq(schema.projects.id, projectId),
+      with: {
         owner: true,
-        members: true,
+        members: {
+          with: {
+            user: true
+          }
+        },
       },
     });
 
-    return NextResponse.json(project, { status: 201 });
-  } catch (error: any) {
-    if (error.code === 'P2003') {
-      return NextResponse.json({ error: 'Invalid user ID. Please log in again or contact support.' }, { status: 400 });
+    if (!project) {
+        throw new Error('Failed to create project');
     }
+
+    // Map members
+    const mappedProject = {
+        ...project,
+        members: project.members.map(m => m.user)
+    };
+
+    return NextResponse.json(mappedProject, { status: 201 });
+  } catch (error: any) {
     console.error('Error creating project:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

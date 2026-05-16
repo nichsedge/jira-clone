@@ -1,18 +1,25 @@
+
 export function Logo() {
   return (
-    <svg
-      width="32"
-      height="32"
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className="text-primary"
-    >
-      <rect width="32" height="32" rx="8" fill="currentColor" />
-      <path
-        d="M16.5443 9.44287V22.5571H19.9886V17.9229H22.0172V15.2286H19.9886V12.1571H22.56V9.44287H16.5443ZM10 17.9229H15.0314V20.6172H12.0143V22.5571H15.0314C15.8257 22.5571 16.5443 21.8414 16.5443 21.0429V17.4229C16.5443 16.6243 15.8257 15.9086 15.0314 15.9086H10V17.9229Z"
-        fill="hsl(var(--primary-foreground))"
-      />
-    </svg>
+    <div className="relative flex items-center justify-center w-8 h-8 rounded-xl overflow-hidden group">
+      <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary/80 to-accent animate-gradient-xy group-hover:rotate-12 transition-transform duration-500" />
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="relative z-10 text-white group-hover:scale-110 transition-transform duration-300"
+      >
+        <path
+          d="M13 2L3 14H12L11 22L21 10H12L13 2Z"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
   );
 }

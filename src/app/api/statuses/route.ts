@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';
+import { statuses } from '@/lib/db/schema';
+import { asc } from 'drizzle-orm';
 import { authOptions } from '@/lib/auth';
 import type { Session } from 'next-auth';
-
-const prisma = new PrismaClient();
 
 interface ExtendedSession extends Session {
   user: {
@@ -25,14 +25,14 @@ export async function GET(request: NextRequest) {
 
     console.log(`DEBUG: Logged in user: ${session.user.email || session.user.name} (ID: ${session.user.id})`);
 
-    const statuses = await prisma.status.findMany({
-      orderBy: { createdAt: 'asc' },
+    const statusesResult = await db.query.statuses.findMany({
+      orderBy: [asc(statuses.createdAt)],
     });
 
-    console.log(`DEBUG: Found ${statuses.length} statuses for user ${session.user.id}`);
-    console.log(`DEBUG: Status IDs:`, statuses.map(s => s.id).join(', '));
+    console.log(`DEBUG: Found ${statusesResult.length} statuses for user ${session.user.id}`);
+    console.log(`DEBUG: Status IDs:`, statusesResult.map(s => s.id).join(', '));
 
-    return NextResponse.json(statuses);
+    return NextResponse.json(statusesResult);
   } catch (error) {
     console.error('Error fetching statuses:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

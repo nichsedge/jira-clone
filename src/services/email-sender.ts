@@ -1,7 +1,5 @@
-// This is a server-side file for sending emails.
 'use server';
 
-import nodemailer from 'nodemailer';
 import type { EmailCredentials } from '@/lib/types';
 
 interface MailOptions {
@@ -18,13 +16,15 @@ interface MailOptions {
  * @returns A promise that resolves when the email is sent.
  */
 export async function sendMail({ to, subject, text, html }: MailOptions, credentials: EmailCredentials) {
+  const nodemailerModule = await import('nodemailer');
+  
   if (!credentials || !credentials.host || !credentials.port || !credentials.user || !credentials.pass) {
      const errorMessage = `Email service is not configured. Please provide all required SMTP credentials.`;
      console.error(errorMessage);
      throw new Error(errorMessage);
   }
 
-  const transporter = nodemailer.createTransport({
+  const transporter = (nodemailerModule.default || nodemailerModule).createTransport({
     host: credentials.host,
     port: credentials.port,
     secure: credentials.port === 465, // true for 465, false for other ports

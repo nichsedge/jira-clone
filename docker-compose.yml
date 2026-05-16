@@ -1,15 +1,16 @@
 services:
-  db:
-    image: postgres:15-alpine
-    restart: always
+  jira-clone-db:
+    image: postgres:latest
+    container_name: jira-clone-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: mysecretpassword
-      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
+    restart: unless-stopped
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - jira-clone-db_data:/var/lib/postgresql/data
 
 volumes:
-  db-data:
+  jira-clone-db_data:

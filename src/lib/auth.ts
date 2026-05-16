@@ -1,9 +1,9 @@
 import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { db } from './db';
+import { users } from './db/schema';
+import { eq } from 'drizzle-orm';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -19,16 +19,16 @@ export const authOptions: NextAuthOptions = {
         }
 
         // Find user by email
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
-            hashedPassword: true,
-          },
-        });
+        const [user] = await db.select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          image: users.image,
+          hashedPassword: users.hashedPassword,
+        })
+        .from(users)
+        .where(eq(users.email, credentials.email as string))
+        .limit(1);
 
         if (!user || !user.hashedPassword) {
           return null;

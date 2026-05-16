@@ -1,12 +1,12 @@
 
 'use server';
 
-import { PrismaClient } from '@prisma/client';
+import { db } from './db';
+import { users } from './db/schema';
+import { eq } from 'drizzle-orm';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { EmailSettings } from './types';
-
-const prisma = new PrismaClient();
 
 /**
  * Saves email settings to the database for the authenticated user.
@@ -32,20 +32,19 @@ export async function saveEmailSettings(settings: EmailSettings) {
       user: settings.smtp.user,
     });
 
-    await prisma.user.update({
-      where: { id: session.user.id },
-      data: {
-        ...(settings.imap.host && { imapHost: settings.imap.host }),
-        ...(settings.imap.port && { imapPort: settings.imap.port }),
-        ...(settings.imap.user && { imapUser: settings.imap.user }),
-        ...(settings.imap.pass && { imapPass: settings.imap.pass }),
-        ...(settings.imap.tls !== undefined && { imapUseTls: settings.imap.tls }),
-        ...(settings.smtp.host && { smtpHost: settings.smtp.host }),
-        ...(settings.smtp.port && { smtpPort: settings.smtp.port }),
-        ...(settings.smtp.user && { smtpUser: settings.smtp.user }),
-        ...(settings.smtp.pass && { smtpPass: settings.smtp.pass }),
-      } as any,
-    });
+    await db.update(users)
+      .set({
+        imapHost: settings.imap.host || null,
+        imapPort: settings.imap.port || null,
+        imapUser: settings.imap.user || null,
+        imapPass: settings.imap.pass || null,
+        imapUseTls: settings.imap.tls ?? null,
+        smtpHost: settings.smtp.host || null,
+        smtpPort: settings.smtp.port || null,
+        smtpUser: settings.smtp.user || null,
+        smtpPass: settings.smtp.pass || null,
+      })
+      .where(eq(users.id, session.user.id));
 
     console.log('Email settings saved successfully for user:', session.user.id);
 
@@ -53,8 +52,6 @@ export async function saveEmailSettings(settings: EmailSettings) {
   } catch (error) {
     console.error('Error saving email settings:', error);
     throw error;
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -69,9 +66,9 @@ export async function getEmailSettings() {
       return null;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-    }) as any;
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
 
     if (!user) {
       return null;
@@ -107,8 +104,6 @@ export async function getEmailSettings() {
   } catch (error) {
     console.error('Error retrieving email settings:', error);
     return null;
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -122,9 +117,8 @@ export async function clearEmailSettings() {
       throw new Error('Unauthorized');
     }
 
-    await prisma.user.update({
-      where: { id: session.user.id },
-      data: {
+    await db.update(users)
+      .set({
         imapHost: null,
         imapPort: null,
         imapUser: null,
@@ -134,14 +128,12 @@ export async function clearEmailSettings() {
         smtpPort: null,
         smtpUser: null,
         smtpPass: null,
-      } as any,
-    });
+      })
+      .where(eq(users.id, session.user.id));
 
     return { success: true };
   } catch (error) {
     console.error('Error clearing email settings:', error);
     throw error;
-  } finally {
-    await prisma.$disconnect();
   }
 }

@@ -7,9 +7,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   images: {
     remotePatterns: [
       {
@@ -18,6 +15,18 @@ const nextConfig = {
         port: '',
         pathname: '/**',
       },
+    ],
+  },
+  // Turbopack root configuration to fix workspace root inference
+  turbopack: {
+    root: "./",
+  },
+  experimental: {
+    optimizePackageImports: [
+      'lucide-react',
+      '@radix-ui/react-icons',
+      'framer-motion',
+      'recharts'
     ],
   },
 };

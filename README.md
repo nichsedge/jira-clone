@@ -1,5 +1,12 @@
-# Firebase Studio
+# Jira Clone
 
-This is a NextJS starter in Firebase Studio.
+A Jira clone built with Next.js, Drizzle ORM, and Bun.
 
-To get started, take a look at src/app/page.tsx.
+To get started:
+
+```bash
+bun install
+bun dev
+```
+
+Take a look at `src/app/page.tsx` to begin editing.

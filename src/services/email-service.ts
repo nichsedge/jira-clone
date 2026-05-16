@@ -1,13 +1,11 @@
+'use server';
 
-'use server'
-
-import { ImapFlow } from 'imapflow';
-import { simpleParser, ParsedMail } from 'mailparser';
 import type { EmailCredentials } from '@/lib/types';
-
-export type { ParsedMail };
+import type { ParsedMail } from 'mailparser';
 
 export async function fetchUnreadEmails(credentials: EmailCredentials): Promise<ParsedMail[]> {
+    const { ImapFlow } = await import('imapflow');
+    const { simpleParser } = await import('mailparser');
     console.log('fetchUnreadEmails: Starting with credentials:', {
         host: credentials.host,
         port: credentials.port,

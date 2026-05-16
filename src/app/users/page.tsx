@@ -4,29 +4,15 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import Link from "next/link";
 import {
-  Home,
-  Ticket as TicketIcon,
-  Users,
-  Settings,
-  FolderKanban,
   PlusCircle,
   MoreHorizontal,
   Trash2,
   Pencil,
+  Mail,
+  Fingerprint,
 } from "lucide-react";
-import {
-  SidebarProvider,
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarFooter,
-  SidebarInset,
-} from "@/components/ui/sidebar";
+
 import {
   Table,
   TableBody,
@@ -54,12 +40,12 @@ import {
 } from "@/components/ui/alert-dialog"
 
 import { Button } from "@/components/ui/button";
-import { UserNav } from "@/components/user-nav";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Logo } from "@/components/logo";
+import { MainLayout } from "@/components/main-layout";
 import { User } from "@/lib/types";
 import { AddUserDialog } from "@/components/add-user-dialog";
 import { toast } from "@/hooks/use-toast";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function UsersPage() {
   const { data: session, status } = useSession();
@@ -80,8 +66,6 @@ export default function UsersPage() {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        // No currentUser state needed for production
-
         const usersRes = await fetch('/api/users');
         if (usersRes.ok) {
           const users = await usersRes.json();
@@ -107,14 +91,6 @@ export default function UsersPage() {
     loadData();
   }, [status, session?.user?.id, router]);
 
-  if (isLoading || status === 'loading') {
-    return <div>Loading...</div>;
-  }
-
-  if (!session) {
-    return null; // Will redirect via useEffect
-  }
-  
   const handleUserAdded = async (newUser: Omit<User, "id">) => {
     try {
       const res = await fetch('/api/users', {
@@ -177,7 +153,6 @@ export default function UsersPage() {
   const handleUserDeleted = async () => {
     if (!userToDelete) return;
 
-    // Check if deleting the logged-in user
     if(userToDelete.id === session?.user?.id) {
         toast({
             variant: "destructive",
@@ -225,153 +200,107 @@ export default function UsersPage() {
     setIsAddUserDialogOpen(true);
   }
 
+  const headerActions = (
+    <Button onClick={openAddDialog} className="premium-gradient shadow-lg shadow-primary/20 hover:scale-105 transition-transform">
+      <PlusCircle className="mr-2 h-4 w-4" />
+      Add User
+    </Button>
+  );
+
   return (
-    <SidebarProvider>
-      <Sidebar collapsible="icon">
-        <SidebarHeader>
-          <div className="flex items-center gap-2 p-2">
-            <Logo />
-            <span className="font-semibold text-lg">ProFlow</span>
+    <MainLayout headerTitle="User Management" headerActions={headerActions}>
+      <Card className="border-border/50 bg-card/50 backdrop-blur-xl overflow-hidden shadow-2xl">
+        {isLoading || status === 'loading' ? (
+          <div className="p-8 space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
           </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/">
-                  <Home />
-                  Dashboard
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/projects">
-                  <FolderKanban />
-                  Projects
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/tickets">
-                  <TicketIcon />
-                  All Tickets
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive>
-                <Link href="/users">
-                  <Users />
-                  Users
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarContent>
-        <SidebarFooter>
-            <div className="flex items-center gap-2 p-2">
-                {session && <UserNav session={session} />}
-            </div>
-             <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild>
-                    <Link href="/settings">
-                      <Settings />
-                      Settings
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                    <ThemeToggle />
-                </SidebarMenuItem>
-            </SidebarMenu>
-        </SidebarFooter>
-      </Sidebar>
-      <SidebarInset>
-        <header className="flex h-14 items-center justify-between gap-4 border-b bg-muted/40 px-4 lg:h-[60px] lg:px-6">
-          <div className="w-full flex-1">
-            <h1 className="font-semibold text-lg">User Management</h1>
-          </div>
-          <Button onClick={openAddDialog}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Add User
-          </Button>
-        </header>
-        <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
-          <div className="border rounded-lg w-full">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {allUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarImage src={user.avatarUrl} alt={user.name} data-ai-hint="person avatar"/>
-                          <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <span className="font-medium">{user.name}</span>
+        ) : (
+          <Table>
+            <TableHeader className="bg-muted/30">
+              <TableRow className="hover:bg-transparent border-border/50">
+                <TableHead className="font-bold uppercase tracking-wider text-[10px] py-4">User</TableHead>
+                <TableHead className="font-bold uppercase tracking-wider text-[10px] py-4">Security ID</TableHead>
+                <TableHead className="font-bold uppercase tracking-wider text-[10px] py-4">Email Address</TableHead>
+                <TableHead className="text-right font-bold uppercase tracking-wider text-[10px] py-4">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {allUsers.map((user) => (
+                <TableRow key={user.id} className="hover:bg-primary/5 transition-colors border-border/30">
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-9 w-9 ring-2 ring-background shadow-md">
+                        <AvatarImage src={user.avatarUrl} alt={user.name} />
+                        <AvatarFallback className="bg-primary/10 text-primary font-bold">{user.name.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-sm">{user.name}</span>
+                        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Team Member</span>
                       </div>
-                    </TableCell>
-                    <TableCell>{user.id}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell className="text-right">
-                       <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                    <span className="sr-only">Actions</span>
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onSelect={() => openEditDialog(user)}>
-                                    <Pencil className="mr-2 h-4 w-4" /> Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => setUserToDelete(user)} className="text-red-600">
-                                    <Trash2 className="mr-2 h-4 w-4" /> Delete
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </main>
-        <AddUserDialog
-          isOpen={isAddUserDialogOpen}
-          onOpenChange={setIsAddUserDialogOpen}
-          userToEdit={userToEdit}
-          onUserAdded={handleUserAdded}
-          onUserUpdated={handleUserUpdated}
-        />
-        <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(undefined)}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete the user <span className="font-semibold">{userToDelete?.name}</span>.
-                </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleUserDeleted}>
-                    Delete
-                </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-      </SidebarInset>
-    </SidebarProvider>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/70 bg-muted/30 px-2 py-1 rounded-md w-fit">
+                        <Fingerprint className="h-3 w-3" />
+                        {user.id.split('-')[0]}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                        <Mail className="h-3 w-3 opacity-40" />
+                        {user.email}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                     <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-primary/10">
+                                  <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="bg-background/80 backdrop-blur-xl border-border/50">
+                              <DropdownMenuItem onSelect={() => openEditDialog(user)}>
+                                  <Pencil className="mr-2 h-4 w-4" /> Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => setUserToDelete(user)} className="text-rose-500 hover:bg-rose-500/10">
+                                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              </DropdownMenuItem>
+                          </DropdownMenuContent>
+                      </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+      
+      <AddUserDialog
+        isOpen={isAddUserDialogOpen}
+        onOpenChange={setIsAddUserDialogOpen}
+        userToEdit={userToEdit}
+        onUserAdded={handleUserAdded}
+        onUserUpdated={handleUserUpdated}
+      />
+      
+      <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(undefined)}>
+          <AlertDialogContent className="bg-background/95 backdrop-blur-xl border-border/50">
+              <AlertDialogHeader>
+              <AlertDialogTitle className="font-bold">Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription className="text-sm font-medium">
+                  This action cannot be undone. This will permanently delete the user <span className="font-bold text-foreground">"{userToDelete?.name}"</span>.
+              </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+              <AlertDialogCancel className="border-border/50">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleUserDeleted} className="bg-rose-500 hover:bg-rose-600 text-white">
+                  Delete
+              </AlertDialogAction>
+              </AlertDialogFooter>
+          </AlertDialogContent>
+      </AlertDialog>
+    </MainLayout>
   );
 }
